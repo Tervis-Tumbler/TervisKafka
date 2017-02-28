@@ -31,10 +31,13 @@ function Invoke-KafkaBrokerProvision {
     #Get-NetConnectionProfile | Set-NetConnectionProfile -NetworkCategory Private
     
     #$Sessions = New-PSSession -ComputerName $KafkaBrokerIPAddresses -Credential $Credential
+    #$Sessions = New-PSSession -ComputerName $KafakVMVMNetworkAdapters.vmname
 
     $KafkaBrokerOU = Get-ADOrganizationalUnit -Filter {Name -eq "KafkaBroker"}
     $ADDomain = Get-ADDomain
     $DomainJoinCredential = Get-PasswordstateCredential -PasswordID 2643
+
+    $TervisKafkaModulePath = (Get-Module -ListAvailable TervisKafka).ModuleBase
 
     foreach ($VMVMNetworkAdapter in $KafakVMVMNetworkAdapters) {
         $VMIPv4Address = $VMVMNetworkAdapter.IPAddresses[0]
@@ -62,10 +65,69 @@ function Invoke-KafkaBrokerProvision {
 
         Install-TervisChocolatey -ComputerName $VMVMNetworkAdapter.VMName
         Install-TervisChocolateyPackages -ChocolateyPackageGroupNames KafkaBroker -ComputerName $VMVMNetworkAdapter.VMName
-    }
 
+        $NodeNumber = $KafakVMVMNetworkAdapters.IndexOf($VMVMNetworkAdapter) + 1
+        ${broker.id} = $NodeNumber
+        ${log.dirs} = "C:/tmp/kafka-logs"
+        $KafkaHome = Get-ChildItem -Directory  "\\$($VMVMNetworkAdapter.VMName)\C$\ProgramData\chocolatey\lib\kafka\tools\"
+
+        "$TervisKafkaModulePath\server.properties.pstemplate" | Invoke-ProcessTemplateFile |
+        Out-File -Encoding utf8 -NoNewline "$($KafkaHome.FullName)\config\server.properties"
+
+        $ZookeeperNodeNames = $KafakVMVMNetworkAdapters.vmname
+        $dataDir = "C:/tmp/zookeeper"
+
+        "$TervisKafkaModulePath\zookeeper.properties.pstemplate" | Invoke-ProcessTemplateFile |
+        Out-File -Encoding ascii -NoNewline "$($KafkaHome.FullName)\config\zookeeper.properties"
+
+        $ZookeeperDataDirOnNode = "\\$($VMVMNetworkAdapter.VMName)\$($dataDir -replace ":","$")"
+        New-Item -ItemType Directory $ZookeeperDataDirOnNode -Force
+
+        $NodeNumber | Out-File -Force "\\$($VMVMNetworkAdapter.VMName)\$($dataDir -replace ":","$")\myid" -Encoding ascii -NoNewline
+    }    
 }
 
+function Get-KafkaZookeeperMyId {
+    $Sessions = New-PSSession -ComputerName $KafakVMVMNetworkAdapters.vmname
+    Invoke-Command -Session $Sessions -ScriptBlock {hostname;get-content "C:\tmp\zookeeper\myid"}
+}
+
+function Start-KafkaZookeeper {
+    $Sessions = New-PSSession -ComputerName $KafakVMVMNetworkAdapters.vmname
+    Invoke-Command -Session $Sessions -ScriptBlock {Start-Service kafka-zookeeper-service}
+}
+
+function Stop-KafkaZookeeper {
+    $Sessions = New-PSSession -ComputerName $KafakVMVMNetworkAdapters.vmname
+    Invoke-Command -Session $Sessions -ScriptBlock {Stop-Service kafka-zookeeper-service}
+}
+
+function Get-KafkaZookeperService {
+    Invoke-Command -Session $Sessions -ScriptBlock {get-service | where name -match zoo}
+}
+
+function Edit-KafkaServerProperties {
+    param (
+        $ComputerName
+    )
+    $KafkaHome = Get-ChildItem -Directory  "\\$ComputerName\C$\ProgramData\chocolatey\lib\kafka\tools\"
+    Start-Process notepad++ "$($KafkaHome.FullName)\config\server.properties"
+}
+
+function Edit-KafkaZookeeperServerProperties {
+    param (
+        $ComputerName
+    )
+    $KafkaHome = Get-ChildItem -Directory  "\\$ComputerName\C$\ProgramData\chocolatey\lib\kafka\tools\"
+    Start-Process notepad++ "$($KafkaHome.FullName)\config\server.properties"
+}
+
+
+$ApplicationDefinitions = [PSCustomObject][Ordered]@{
+    NodeNameRoot = "kafka"
+    NumberOfNodes = 3
+    Environments = "Production"
+}
 
 function Get-ComputerNameOnOrOffDomain {
     [CmdletBinding()]
