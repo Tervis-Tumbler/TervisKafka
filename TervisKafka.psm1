@@ -87,6 +87,25 @@ function Invoke-KafkaBrokerProvision {
     }    
 }
 
+function New-KafkaBrokerGPO {
+    $KafkaBrokerFirewallGPO = Get-GPO -Name "KafkaBrokerFirewall"
+    if (-not $KafkaBrokerFirewallGPO) {    
+        $KafkaBrokerFirewallGPO = New-GPO -Name "KafkaBrokerFirewall"
+    }
+    
+    $KafkaBrokerOU = Get-ADOrganizationalUnit -Filter {Name -eq "KafkaBroker"}
+    $KafkaBrokerFirewallGPO | New-GPLink -Target $KafkaBrokerOU
+    $ADDomain = Get-ADDomain
+    $GPOSession = Open-NetGPO –PolicyStore "$($ADDomain.DNSRoot)\KafkaBrokerFirewall"
+    New-NetFirewallRule -GPOSession $GPOSession -Name Kafka-Zookeeper -DisplayName Kafka-Zookeeper -Direction Inbound -LocalPort 2181,2888,3888 -Protocol TCP -Action Allow -Group Kafka
+    New-NetFirewallRule -GPOSession $GPOSession -Name Kafka-Broker -DisplayName Kafka-Broker -Direction Inbound -LocalPort 9092 -Protocol TCP -Action Allow -Group Kafka
+    Save-NetGPO -GPOSession $GPOSession
+
+    Remove-NetFirewallRule -GPOSession $GPOSession -Name zookeeper
+    Save-NetGPO -GPOSession $GPOSession
+    $KafakVMVMNetworkAdapters.vmname | % { Invoke-GPUpdate -Computer $_ -RandomDelayInMinutes 0}
+}
+
 function Get-KafkaZookeeperMyId {
     $Sessions = New-PSSession -ComputerName $KafakVMVMNetworkAdapters.vmname
     Invoke-Command -Session $Sessions -ScriptBlock {hostname;get-content "C:\tmp\zookeeper\myid"}
@@ -102,8 +121,28 @@ function Stop-KafkaZookeeper {
     Invoke-Command -Session $Sessions -ScriptBlock {Stop-Service kafka-zookeeper-service}
 }
 
-function Get-KafkaZookeperService {
+function Start-Kafka {
+    $Sessions = New-PSSession -ComputerName $KafakVMVMNetworkAdapters.vmname
+    Invoke-Command -Session $Sessions -ScriptBlock {Start-Service kafka-service}
+}
+
+function Stop-Kafka {
+    $Sessions = New-PSSession -ComputerName $KafakVMVMNetworkAdapters.vmname
+    Invoke-Command -Session $Sessions -ScriptBlock {Stop-Service kafka-service}
+}
+
+function Get-KafkaTopics {
+    start-process "$($KafkaHome.FullName)\bin\windows\kafka-topics.bat" "--zookeeper $($KafakVMVMNetworkAdapters.vmname[0]):2181"
+}
+
+function Get-KafkaZookeeperService {
     Invoke-Command -Session $Sessions -ScriptBlock {get-service | where name -match zoo}
+}
+
+function Get-KafkaZookeeperStatus {    
+    $KafakVMVMNetworkAdapters.vmname | % {$_; Send-NetworkData -Computer $_ -Port 2181 -Data "srvr" -ErrorAction SilentlyContinue}
+    $KafakVMVMNetworkAdapters.vmname | % {$_; Send-NetworkData -Computer $_ -Port 2181 -Data "mntr" -ErrorAction SilentlyContinue}
+    $KafakVMVMNetworkAdapters.vmname | % {$_; Send-NetworkData -Computer $_ -Port 2181 -Data "isro" -ErrorAction SilentlyContinue}
 }
 
 function Edit-KafkaServerProperties {
@@ -120,13 +159,6 @@ function Edit-KafkaZookeeperServerProperties {
     )
     $KafkaHome = Get-ChildItem -Directory  "\\$ComputerName\C$\ProgramData\chocolatey\lib\kafka\tools\"
     Start-Process notepad++ "$($KafkaHome.FullName)\config\server.properties"
-}
-
-
-$ApplicationDefinitions = [PSCustomObject][Ordered]@{
-    NodeNameRoot = "kafka"
-    NumberOfNodes = 3
-    Environments = "Production"
 }
 
 function Get-ComputerNameOnOrOffDomain {
