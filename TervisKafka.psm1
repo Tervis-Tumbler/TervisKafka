@@ -2,25 +2,22 @@
 #Requires -modules PasswordstatePowershell, TervisChocolatey, TervisNetTCPIP
 #Requires -RunAsAdministrator
 
-function Get-KafkaVM {
-    Invoke-Command -ComputerName hypervc5n2 -ScriptBlock { 
-        get-vm  | 
-        where name -match kafka | 
-        foreach {
-            $_ | Add-Member -Name VMNetworkAdapter -MemberType NoteProperty -PassThru -Value $( 
-                $_ | Get-VMNetworkAdapter
-            )
-        }
-    }
+function Get-KafkaNodeNames {
+    Get-TervisClusterApplicationNodeNames -Name kafka
 }
 
-function Get-KafakVMVMNetworkAdapter {
-    Invoke-Command -ComputerName hypervc5n2 -ScriptBlock { get-vm  | where name -match kafka | Get-VMNetworkAdapter}
+function Get-KafkaVM {
+    Find-TervisVM -Name $(Get-KafkaNodeNames)
+}
+
+function Get-KafakVMNetworkAdapter {
+    Get-KafkaVM | select -ExpandProperty VMNetworkAdapter
 }
 
 function Invoke-KafkaBrokerProvision {
     $Credential = Get-PasswordstateCredential -PasswordID 4084
-    $KafakVMVMNetworkAdapters = Get-KafakVMVMNetworkAdapter
+    $KafkaNodeNames = Get-KafkaNodeNames
+    $KafakVMVMNetworkAdapters = Get-KafakVMNetworkAdapter
     
     $KafkaBrokerIPAddresses = $KafakVMVMNetworkAdapters.ipaddresses |
     where { $_ -NotMatch ":" } 
@@ -67,15 +64,12 @@ function Invoke-KafkaBrokerProvision {
         Install-TervisChocolateyPackages -ChocolateyPackageGroupNames KafkaBroker -ComputerName $VMVMNetworkAdapter.VMName
 
         $NodeNumber = $KafakVMVMNetworkAdapters.IndexOf($VMVMNetworkAdapter) + 1
-        ${broker.id} = $NodeNumber
-        ${log.dirs} = "C:/tmp/kafka-logs"
         $KafkaHome = Get-ChildItem -Directory  "\\$($VMVMNetworkAdapter.VMName)\C$\ProgramData\chocolatey\lib\kafka\tools\"
 
         "$TervisKafkaModulePath\server.properties.pstemplate" | Invoke-ProcessTemplateFile |
         Out-File -Encoding utf8 -NoNewline "$($KafkaHome.FullName)\config\server.properties"
 
         $ZookeeperNodeNames = $KafakVMVMNetworkAdapters.vmname
-        $dataDir = "C:/tmp/zookeeper"
 
         "$TervisKafkaModulePath\zookeeper.properties.pstemplate" | Invoke-ProcessTemplateFile |
         Out-File -Encoding ascii -NoNewline "$($KafkaHome.FullName)\config\zookeeper.properties"
@@ -83,9 +77,34 @@ function Invoke-KafkaBrokerProvision {
         $ZookeeperDataDirOnNode = "\\$($VMVMNetworkAdapter.VMName)\$($dataDir -replace ":","$")"
         New-Item -ItemType Directory $ZookeeperDataDirOnNode -Force
 
-        $NodeNumber | Out-File -Force "\\$($VMVMNetworkAdapter.VMName)\$($dataDir -replace ":","$")\myid" -Encoding ascii -NoNewline
+        $NodeNumber | Out-File -Force "$ZookeeperDataDirOnNode\myid" -Encoding ascii -NoNewline
     }    
 }
+
+${broker.id} = $NodeNumber
+${log.dirs} = "C:/tmp/kafka-logs"
+$dataDir = "C:/tmp/zookeeper"
+
+function New-KafakNodePSSession {
+    New-PSSession -ComputerName $(Get-KafkaNodeNames)
+}
+
+function Remove-KafkaData {
+    $Sessions = New-KafakNodePSSession
+    Stop-Kafka
+    foreach ($Session in $Sessions) {
+        Remove-Item "\\$($Session.computername)\$(${log.dirs} -replace ":","$")" -Recurse
+    }
+}
+
+function Remove-ZookeperData {
+    $Sessions = New-KafakNodePSSession
+    Stop-KafkaZookeeper
+    foreach ($Session in $Sessions) {
+        Remove-Item "\\$($Session.computername)\$($dataDir -replace ":","$")" -Recurse
+    }
+}
+
 
 function New-KafkaBrokerGPO {
     $KafkaBrokerFirewallGPO = Get-GPO -Name "KafkaBrokerFirewall"
@@ -107,27 +126,35 @@ function New-KafkaBrokerGPO {
 }
 
 function Get-KafkaZookeeperMyId {
-    $Sessions = New-PSSession -ComputerName $KafakVMVMNetworkAdapters.vmname
+    $Sessions = New-KafakNodePSSession
     Invoke-Command -Session $Sessions -ScriptBlock {hostname;get-content "C:\tmp\zookeeper\myid"}
 }
 
 function Start-KafkaZookeeper {
-    $Sessions = New-PSSession -ComputerName $KafakVMVMNetworkAdapters.vmname
+    param (
+        $Sessions = $(New-KafakNodePSSession)
+    )
     Invoke-Command -Session $Sessions -ScriptBlock {Start-Service kafka-zookeeper-service}
 }
 
 function Stop-KafkaZookeeper {
-    $Sessions = New-PSSession -ComputerName $KafakVMVMNetworkAdapters.vmname
+    param (
+        $Sessions = $(New-KafakNodePSSession)
+    )
     Invoke-Command -Session $Sessions -ScriptBlock {Stop-Service kafka-zookeeper-service}
 }
 
 function Start-Kafka {
-    $Sessions = New-PSSession -ComputerName $KafakVMVMNetworkAdapters.vmname
+    param (
+        $Sessions = $(New-KafakNodePSSession)
+    )
     Invoke-Command -Session $Sessions -ScriptBlock {Start-Service kafka-service}
 }
 
 function Stop-Kafka {
-    $Sessions = New-PSSession -ComputerName $KafakVMVMNetworkAdapters.vmname
+    param (
+        $Sessions = $(New-KafakNodePSSession)
+    )
     Invoke-Command -Session $Sessions -ScriptBlock {Stop-Service kafka-service}
 }
 
@@ -139,10 +166,14 @@ function Get-KafkaZookeeperService {
     Invoke-Command -Session $Sessions -ScriptBlock {get-service | where name -match zoo}
 }
 
+function Get-KafkaService {
+    Invoke-Command -Session $Sessions -ScriptBlock {get-service | where name -match kafka-service}
+}
+
 function Get-KafkaZookeeperStatus {    
-    $KafakVMVMNetworkAdapters.vmname | % {$_; Send-NetworkData -Computer $_ -Port 2181 -Data "srvr" -ErrorAction SilentlyContinue}
-    $KafakVMVMNetworkAdapters.vmname | % {$_; Send-NetworkData -Computer $_ -Port 2181 -Data "mntr" -ErrorAction SilentlyContinue}
-    $KafakVMVMNetworkAdapters.vmname | % {$_; Send-NetworkData -Computer $_ -Port 2181 -Data "isro" -ErrorAction SilentlyContinue}
+    $Sessions.ComputerName | % {$_; Send-NetworkData -Computer $_ -Port 2181 -Data "srvr" -ErrorAction SilentlyContinue}
+    $Sessions.ComputerName | % {$_; Send-NetworkData -Computer $_ -Port 2181 -Data "mntr" -ErrorAction SilentlyContinue}
+    $Sessions.ComputerName | % {$_; Send-NetworkData -Computer $_ -Port 2181 -Data "isro" -ErrorAction SilentlyContinue}
 }
 
 function Edit-KafkaServerProperties {
