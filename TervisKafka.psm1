@@ -65,6 +65,7 @@ function Invoke-KafkaBrokerProvision {
 
         $NodeNumber = $KafakVMVMNetworkAdapters.IndexOf($VMVMNetworkAdapter) + 1
         $KafkaHome = Get-ChildItem -Directory  "\\$($VMVMNetworkAdapter.VMName)\C$\ProgramData\chocolatey\lib\kafka\tools\"
+        ${broker.id} = $NodeNumber
 
         "$TervisKafkaModulePath\server.properties.pstemplate" | Invoke-ProcessTemplateFile |
         Out-File -Encoding utf8 -NoNewline "$($KafkaHome.FullName)\config\server.properties"
@@ -81,12 +82,24 @@ function Invoke-KafkaBrokerProvision {
     }    
 }
 
-${broker.id} = $NodeNumber
+
 ${log.dirs} = "C:/tmp/kafka-logs"
 $dataDir = "C:/tmp/zookeeper"
 
-function New-KafakNodePSSession {
+function New-KafkaNodePSSession {
     New-PSSession -ComputerName $(Get-KafkaNodeNames)
+}
+
+function Get-KafkaLog {
+    param (
+        $ComputerName,
+
+        [ValidateSet("controller","kafka-authorizer","kafka-request","log-cleaner","server","state-change")]
+        $LogType
+    )
+
+    $KafkaHome = Get-ChildItem -Directory  "\\$ComputerName\C$\ProgramData\chocolatey\lib\kafka\tools\"
+    get-content -Tail 300 -Path "$($KafkaHome.FullName)\logs\$LogType.log"
 }
 
 function Remove-KafkaData {
@@ -167,7 +180,17 @@ function Get-KafkaZookeeperService {
 }
 
 function Get-KafkaService {
+    param (
+        $Sessions = $(New-KafakNodePSSession)
+    )
+
     Invoke-Command -Session $Sessions -ScriptBlock {get-service | where name -match kafka-service}
+}
+
+function Get-KafkaServiceNetTCPConnection {
+    Invoke-Command -Session $Sessions -ScriptBlock {        
+        Get-NetTCPConnection -LocalPort 9092
+    }
 }
 
 function Get-KafkaZookeeperStatus {    
