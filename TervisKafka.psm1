@@ -177,5 +177,5 @@ function Edit-KafkaZookeeperServerProperties {
         $ComputerName
     )
     $KafkaHome = Get-ChildItem -Directory  "\\$ComputerName\C$\ProgramData\chocolatey\lib\kafka\tools\"
-    Start-Process notepad++ "$($KafkaHome.FullName)\config\server.properties"
+    Start-Process notepad++ "$($KafkaHome.FullName)\config\zookeeper.properties"
 }
