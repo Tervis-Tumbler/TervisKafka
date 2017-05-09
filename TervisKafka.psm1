@@ -2,47 +2,48 @@
 #Requires -modules PasswordstatePowershell, TervisChocolatey, TervisNetTCPIP
 #Requires -RunAsAdministrator
 
-function Get-KafkaNodes {
-    Get-TervisClusterApplicationNode -ClusterApplicationName KafkaBroker -ExludeVM
-}
-
-function Get-KafkaVM {
-    Find-TervisVM -Name $(Get-KafkaNodeNames)
-}
-
-function Get-KafakVMNetworkAdapter {
-    Get-KafkaVM | select -ExpandProperty VMNetworkAdapter
-}
-
 function Invoke-KafkaBrokerProvision {
-    Invoke-ClusterApplicationProvision -ClusterApplicationName KafkaBroker
-
-    $TervisKafkaModulePath = (Get-Module -ListAvailable TervisKafka).ModuleBase
-
-    foreach ($VMVMNetworkAdapter in $KafakVMVMNetworkAdapters) {
-
-        $NodeNumber = $KafakVMVMNetworkAdapters.IndexOf($VMVMNetworkAdapter) + 1
-        $KafkaHome = Get-ChildItem -Directory  "\\$($VMVMNetworkAdapter.VMName)\C$\ProgramData\chocolatey\lib\kafka\tools\"
-        ${broker.id} = $NodeNumber
-
-        "$TervisKafkaModulePath\server.properties.pstemplate" | Invoke-ProcessTemplateFile |
-        Out-File -Encoding utf8 -NoNewline "$($KafkaHome.FullName)\config\server.properties"
-
-        $ZookeeperNodeNames = $KafakVMVMNetworkAdapters.vmname
-
-        "$TervisKafkaModulePath\zookeeper.properties.pstemplate" | Invoke-ProcessTemplateFile |
-        Out-File -Encoding ascii -NoNewline "$($KafkaHome.FullName)\config\zookeeper.properties"
-
-        $ZookeeperDataDirOnNode = "\\$($VMVMNetworkAdapter.VMName)\$($dataDir -replace ":","$")"
-        New-Item -ItemType Directory $ZookeeperDataDirOnNode -Force
-
-        $NodeNumber | Out-File -Force "$ZookeeperDataDirOnNode\myid" -Encoding ascii -NoNewline
-    }    
+    param (
+        $EnvironmentName
+    )
+    Invoke-ClusterApplicationProvision -ClusterApplicationName KafkaBroker -EnvironmentName $EnvironmentName
+    $Nodes = Get-TervisClusterApplicationNode -ClusterApplicationName KafkaBroker -EnvironmentName $EnvironmentName
+    $Nodes | Invoke-ProcessKafkaTemplateFiles
+    New-KafkaBrokerGPO
+    $Nodes | Invoke-NodeGPUpdate
 }
 
+function Invoke-ProcessKafkaTemplateFiles {
+    param (
+        [Parameter(Mandatory,ValueFromPipelineByPropertyName)]$ComputerName,
+        [Parameter(Mandatory,ValueFromPipelineByPropertyName)]$EnvironmentName
+    )
+    begin {
+        $KafakChocolateyPackageTools = "C:\ProgramData\chocolatey\lib\kafka\tools\"
+        $RootDirectory = Get-ChildItem -Directory -Path $KafakChocolateyPackageTools
+        $KafkaModulePath = (Get-Module -ListAvailable TervisKafka).ModuleBase
+        $KafkaHomeTemplateFilesPath = "$KafkaModulePath\KafkaHome"
+        $ZookeeperDataDirectoryTemplateFilesPath = "$KafkaModulePath\ZookeeperDataDirectory"
+        $ZookeeperDataDirectory = "C:\tmp\zookeeper"
+    }
+    process {                
+        $Nodes = Get-TervisClusterApplicationNode -ClusterApplicationName KafkaBroker -EnvironmentName $EnvironmentName
+        $NodeNumber = $Nodes.ComputerName.IndexOf($ComputerName) + 1
+        $dataDir = "C:/tmp/zookeeper"
 
-${log.dirs} = "C:/tmp/kafka-logs"
-$dataDir = "C:/tmp/zookeeper"
+        $TemplateVariables = @{
+            "broker.id" = $NodeNumber
+            "log.dirs" = "C:/tmp/kafka-logs"
+            dataDir = $dataDir
+            ZookeeperNodeNames = $Nodes.ComputerName
+        }
+        $RootDirectoryRemote = $RootDirectory | ConvertTo-RemotePath -ComputerName $ComputerName
+        Invoke-ProcessTemplatePath -Path $KafkaHomeTemplateFilesPath -DestinationPath $RootDirectoryRemote -TemplateVariables $TemplateVariables
+        
+        $RootDirectoryRemote = $ZookeeperDataDirectory | ConvertTo-RemotePath -ComputerName $ComputerName
+        Invoke-ProcessTemplatePath -Path $ZookeeperDataDirectoryTemplateFilesPath -DestinationPath $RootDirectoryRemote -TemplateVariables @{myid=$NodeNumber}
+    }
+}
 
 function New-KafkaNodePSSession {
     New-ApplicationNodePSSession -ClusterApplicationName KafkaBroker
@@ -88,19 +89,18 @@ function New-KafkaBrokerGPO {
     $KafkaBrokerFirewallGPO = Get-GPO -Name "KafkaBrokerFirewall"
     if (-not $KafkaBrokerFirewallGPO) {    
         $KafkaBrokerFirewallGPO = New-GPO -Name "KafkaBrokerFirewall"
-    }
     
-    $KafkaBrokerOU = Get-ADOrganizationalUnit -Filter {Name -eq "KafkaBroker"}
-    $KafkaBrokerFirewallGPO | New-GPLink -Target $KafkaBrokerOU
-    $ADDomain = Get-ADDomain
-    $GPOSession = Open-NetGPO –PolicyStore "$($ADDomain.DNSRoot)\KafkaBrokerFirewall"
-    New-NetFirewallRule -GPOSession $GPOSession -Name Kafka-Zookeeper -DisplayName Kafka-Zookeeper -Direction Inbound -LocalPort 2181,2888,3888 -Protocol TCP -Action Allow -Group Kafka
-    New-NetFirewallRule -GPOSession $GPOSession -Name Kafka-Broker -DisplayName Kafka-Broker -Direction Inbound -LocalPort 9092 -Protocol TCP -Action Allow -Group Kafka
-    Save-NetGPO -GPOSession $GPOSession
+        $KafkaBrokerOU = Get-ADOrganizationalUnit -Filter {Name -eq "KafkaBroker"}
+        $KafkaBrokerFirewallGPO | New-GPLink -Target $KafkaBrokerOU
+        $ADDomain = Get-ADDomain
+        $GPOSession = Open-NetGPO –PolicyStore "$($ADDomain.DNSRoot)\KafkaBrokerFirewall"
+        New-NetFirewallRule -GPOSession $GPOSession -Name Kafka-Zookeeper -DisplayName Kafka-Zookeeper -Direction Inbound -LocalPort 2181,2888,3888 -Protocol TCP -Action Allow -Group Kafka
+        New-NetFirewallRule -GPOSession $GPOSession -Name Kafka-Broker -DisplayName Kafka-Broker -Direction Inbound -LocalPort 9092 -Protocol TCP -Action Allow -Group Kafka
+        Save-NetGPO -GPOSession $GPOSession
 
-    Remove-NetFirewallRule -GPOSession $GPOSession -Name zookeeper
-    Save-NetGPO -GPOSession $GPOSession
-    $KafakVMVMNetworkAdapters.vmname | % { Invoke-GPUpdate -Computer $_ -RandomDelayInMinutes 0}
+        Remove-NetFirewallRule -GPOSession $GPOSession -Name zookeeper
+        Save-NetGPO -GPOSession $GPOSession
+    }
 }
 
 function Get-KafkaZookeeperMyId {
