@@ -167,12 +167,21 @@ function Stop-Kafka {
 
 function Get-KafkaHome {
     param (
-        [Parameter(ValueFromPipelineByPropertyName)]$ComputerName = "localhost"
+        [Parameter(ValueFromPipelineByPropertyName)]$ComputerName = "localhost",
+        [Switch]$AsRemotePath
     )
-    $KafakChocolateyPackageTools = "C:\ProgramData\chocolatey\lib\kafka\tools\"
-    $KafakChocolateyPackageToolsRemote = $KafakChocolateyPackageTools | ConvertTo-RemotePath -ComputerName $ComputerName
-    $KafakHomeRemote = Get-ChildItem -Directory -Path $KafakChocolateyPackageToolsRemote | select -ExpandProperty FullName
-    $KafakHomeRemote
+    $KafakChocolateyPackageToolsPath = "C:\ProgramData\chocolatey\lib\kafka\tools\"
+    $KafkaHome = Invoke-Command -ComputerName $ComputerName  -ScriptBlock {
+        Get-ChildItem -Directory -Path $Using:KafakChocolateyPackageToolsPath | 
+        select -ExpandProperty FullName
+    }
+
+    if ($AsRemotePath) {
+        $KafkaHome | ConvertTo-RemotePath -ComputerName $ComputerName
+    } else {
+        $KafkaHome
+    }
+
 }
 
 function Get-KafkaTopics {
@@ -181,7 +190,9 @@ function Get-KafkaTopics {
     )
     process {
         $KafkaHome = Get-KafkaHome -ComputerName $ComputerName
-        start-process "$KafkaHome\bin\windows\kafka-topics.bat" "--zookeeper $($ComputerName):2181 --list"
+        Invoke-Command -ComputerName $ComputerName -ScriptBlock {
+            . "$Using:KafkaHome\bin\windows\kafka-topics.bat" --zookeeper "$($Using:ComputerName):2181" --list
+        }
     }
 }
 
