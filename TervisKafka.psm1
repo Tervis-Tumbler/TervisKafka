@@ -36,7 +36,7 @@ function Invoke-ProcessKafkaTemplateFiles {
         $ZookeeperDataDirectoryTemplateFilesPath = "$KafkaModulePath\ZookeeperDataDirectory"
         $ZookeeperDataDirectory = "C:\tmp\zookeeper"
     }
-    process {                
+    process {
         $Nodes = Get-TervisClusterApplicationNode -ClusterApplicationName KafkaBroker -EnvironmentName $EnvironmentName
         $NodeNumber = $Nodes.ComputerName.IndexOf($ComputerName) + 1
         $dataDir = "C:/tmp/zookeeper"
@@ -49,7 +49,7 @@ function Invoke-ProcessKafkaTemplateFiles {
         }
 
         $KafakChocolateyPackageToolsRemote = $KafakChocolateyPackageTools | ConvertTo-RemotePath -ComputerName $ComputerName
-        $KafakHomeRemote = Get-ChildItem -Directory -Path $KafakChocolateyPackageToolsRemote
+        $KafakHomeRemote = Get-ChildItem -Directory -Path $KafakChocolateyPackageToolsRemote | select -ExpandProperty FullName
         Invoke-ProcessTemplatePath -Path $KafkaHomeTemplateFilesPath -DestinationPath $KafakHomeRemote -TemplateVariables $TemplateVariables
         
         $ZookeeperDataDirectoryRemote = $ZookeeperDataDirectory | ConvertTo-RemotePath -ComputerName $ComputerName
