@@ -175,10 +175,11 @@ function Get-KafkaZookeeperService {
 
 function Get-KafkaService {
     param (
-        $Sessions = $(New-KafakNodePSSession)
+        [Parameter(ValueFromPipelineByPropertyName)]$ComputerName
     )
-
-    Invoke-Command -Session $Sessions -ScriptBlock {get-service | where name -match kafka-service}
+    process {
+        Invoke-Command -ComputerName $ComputerName -ScriptBlock {get-service | where name -match kafka-service}
+    }
 }
 
 function Get-KafkaServiceNetTCPConnection {
