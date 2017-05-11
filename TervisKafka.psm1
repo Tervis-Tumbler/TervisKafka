@@ -184,7 +184,22 @@ function Get-KafkaHome {
 
 }
 
-function Get-KafkaTopics {
+function New-KafkaTopic {
+    param (
+        [Parameter(ValueFromPipelineByPropertyName)]$ComputerName,
+        [Parameter(Mandatory)]$TopicName,
+        [Parameter(Mandatory)]$Partitions,
+        [Parameter(Mandatory)]$ReplicationFactor
+    )
+    process {
+        $KafkaHome = Get-KafkaHome -ComputerName $ComputerName
+        Invoke-Command -ComputerName $ComputerName -ScriptBlock {
+            . "$Using:KafkaHome\bin\windows\kafka-topics.bat" --zookeeper "$($Using:ComputerName):2181" --create --topic $Using:TopicName --partitions $Using:Partitions --replication-factor $Using:ReplicationFactor
+        }
+    }
+}
+
+function Get-KafkaTopic {
     param (
         [Parameter(ValueFromPipelineByPropertyName)]$ComputerName
     )
