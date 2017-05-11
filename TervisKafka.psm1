@@ -20,7 +20,6 @@ function Invoke-ProcessKafkaTemplateFiles {
     )
     begin {
         $KafakChocolateyPackageTools = "C:\ProgramData\chocolatey\lib\kafka\tools\"
-        $RootDirectory = Get-ChildItem -Directory -Path $KafakChocolateyPackageTools
         $KafkaModulePath = (Get-Module -ListAvailable TervisKafka).ModuleBase
         $KafkaHomeTemplateFilesPath = "$KafkaModulePath\KafkaHome"
         $ZookeeperDataDirectoryTemplateFilesPath = "$KafkaModulePath\ZookeeperDataDirectory"
@@ -37,11 +36,13 @@ function Invoke-ProcessKafkaTemplateFiles {
             dataDir = $dataDir
             ZookeeperNodeNames = $Nodes.ComputerName
         }
-        $RootDirectoryRemote = $RootDirectory | ConvertTo-RemotePath -ComputerName $ComputerName
-        Invoke-ProcessTemplatePath -Path $KafkaHomeTemplateFilesPath -DestinationPath $RootDirectoryRemote -TemplateVariables $TemplateVariables
+
+        $KafakChocolateyPackageToolsRemote = $KafakChocolateyPackageTools | ConvertTo-RemotePath -ComputerName $ComputerName
+        $KafakHomeRemote = Get-ChildItem -Directory -Path $KafakChocolateyPackageToolsRemote
+        Invoke-ProcessTemplatePath -Path $KafkaHomeTemplateFilesPath -DestinationPath $KafakHomeRemote -TemplateVariables $TemplateVariables
         
-        $RootDirectoryRemote = $ZookeeperDataDirectory | ConvertTo-RemotePath -ComputerName $ComputerName
-        Invoke-ProcessTemplatePath -Path $ZookeeperDataDirectoryTemplateFilesPath -DestinationPath $RootDirectoryRemote -TemplateVariables @{myid=$NodeNumber}
+        $ZookeeperDataDirectoryRemote = $ZookeeperDataDirectory | ConvertTo-RemotePath -ComputerName $ComputerName
+        Invoke-ProcessTemplatePath -Path $ZookeeperDataDirectoryTemplateFilesPath -DestinationPath $ZookeeperDataDirectoryRemote -TemplateVariables @{myid=$NodeNumber}
     }
 }
 
@@ -104,8 +105,17 @@ function New-KafkaBrokerGPO {
 }
 
 function Get-KafkaZookeeperMyId {
-    $Sessions = New-KafakNodePSSession
-    Invoke-Command -Session $Sessions -ScriptBlock {hostname;get-content "C:\tmp\zookeeper\myid"}
+    param (
+        [Parameter(ValueFromPipelineByPropertyName)]$ComputerName
+    )
+    begin {
+        $MyIdPath = "C:\tmp\zookeeper\myid"
+    }
+    process {
+        $MyIdPathRemote = $MyIdPath | ConvertTo-RemotePath -ComputerName $ComputerName
+        $ComputerName
+        Get-Content -Path $MyIdPathRemote
+    }
 }
 
 function Start-KafkaZookeeper {
