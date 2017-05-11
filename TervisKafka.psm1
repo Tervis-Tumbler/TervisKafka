@@ -11,6 +11,17 @@ function Invoke-KafkaBrokerProvision {
     $Nodes | Invoke-ProcessKafkaTemplateFiles
     New-KafkaBrokerGPO
     $Nodes | Invoke-NodeGPUpdate
+    $Nodes | Set-KafkaServicesToAumaticStart
+}
+
+function Set-KafkaServicesToAumaticStart {
+    param (
+        [Parameter(Mandatory,ValueFromPipelineByPropertyName)]$ComputerName
+    )
+    process {
+        Set-Service -StartupType Automatic -Name kafka-zookeeper-service -ComputerName $ComputerName
+        Set-Service -StartupType Automatic -Name kafka-service -ComputerName $ComputerName
+    }
 }
 
 function Invoke-ProcessKafkaTemplateFiles {
@@ -42,7 +53,7 @@ function Invoke-ProcessKafkaTemplateFiles {
         Invoke-ProcessTemplatePath -Path $KafkaHomeTemplateFilesPath -DestinationPath $KafakHomeRemote -TemplateVariables $TemplateVariables
         
         $ZookeeperDataDirectoryRemote = $ZookeeperDataDirectory | ConvertTo-RemotePath -ComputerName $ComputerName
-        Invoke-ProcessTemplatePath -Path $ZookeeperDataDirectoryTemplateFilesPath -DestinationPath $ZookeeperDataDirectoryRemote -TemplateVariables @{myid=$NodeNumber}
+        Invoke-ProcessTemplatePath -Path $ZookeeperDataDirectoryTemplateFilesPath -DestinationPath $ZookeeperDataDirectoryRemote -TemplateVariables @{NodeNumber=$NodeNumber}
     }
 }
 
@@ -120,30 +131,38 @@ function Get-KafkaZookeeperMyId {
 
 function Start-KafkaZookeeper {
     param (
-        $Sessions = $(New-KafakNodePSSession)
+        [Parameter(ValueFromPipelineByPropertyName)]$ComputerName
     )
-    Invoke-Command -Session $Sessions -ScriptBlock {Start-Service kafka-zookeeper-service}
+    process {
+        Start-ServiceOnNode -ComputerName $ComputerName -Name kafka-zookeeper-service
+    }
 }
 
 function Stop-KafkaZookeeper {
     param (
-        $Sessions = $(New-KafakNodePSSession)
+        [Parameter(ValueFromPipelineByPropertyName)]$ComputerName
     )
-    Invoke-Command -Session $Sessions -ScriptBlock {Stop-Service kafka-zookeeper-service}
+    process {
+        Stop-ServiceOnNode -ComputerName $ComputerName -Name kafka-zookeeper-service
+    }
 }
 
 function Start-Kafka {
     param (
-        $Sessions = $(New-KafakNodePSSession)
+        [Parameter(ValueFromPipelineByPropertyName)]$ComputerName
     )
-    Invoke-Command -Session $Sessions -ScriptBlock {Start-Service kafka-service}
+    process {
+        Start-ServiceOnNode -ComputerName $ComputerName -Name kafka-service
+    }
 }
 
 function Stop-Kafka {
     param (
-        $Sessions = $(New-KafakNodePSSession)
+        [Parameter(ValueFromPipelineByPropertyName)]$ComputerName
     )
-    Invoke-Command -Session $Sessions -ScriptBlock {Stop-Service kafka-service}
+    process {
+        Stop-ServiceOnNode -ComputerName $ComputerName -Name kafka-service
+    }
 }
 
 function Get-KafkaTopics {
@@ -168,10 +187,15 @@ function Get-KafkaServiceNetTCPConnection {
     }
 }
 
-function Get-KafkaZookeeperStatus {    
-    $Sessions.ComputerName | % {$_; Send-NetworkData -Computer $_ -Port 2181 -Data "srvr" -ErrorAction SilentlyContinue}
-    $Sessions.ComputerName | % {$_; Send-NetworkData -Computer $_ -Port 2181 -Data "mntr" -ErrorAction SilentlyContinue}
-    $Sessions.ComputerName | % {$_; Send-NetworkData -Computer $_ -Port 2181 -Data "isro" -ErrorAction SilentlyContinue}
+function Get-KafkaZookeeperStatus {
+    param (
+        [Parameter(ValueFromPipelineByPropertyName)]$ComputerName
+    )
+    process {
+        $ComputerName | % {$_; Send-NetworkData -Computer $_ -Port 2181 -Data "srvr" -ErrorAction SilentlyContinue}
+        $ComputerName | % {$_; Send-NetworkData -Computer $_ -Port 2181 -Data "mntr" -ErrorAction SilentlyContinue}
+        $ComputerName | % {$_; Send-NetworkData -Computer $_ -Port 2181 -Data "isro" -ErrorAction SilentlyContinue}
+    }
 }
 
 function Edit-KafkaServerProperties {
