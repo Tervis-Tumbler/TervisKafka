@@ -165,12 +165,33 @@ function Stop-Kafka {
     }
 }
 
+function Get-KafkaHome {
+    param (
+        [Parameter(ValueFromPipelineByPropertyName)]$ComputerName = "localhost"
+    )
+    $KafakChocolateyPackageTools = "C:\ProgramData\chocolatey\lib\kafka\tools\"
+    $KafakChocolateyPackageToolsRemote = $KafakChocolateyPackageTools | ConvertTo-RemotePath -ComputerName $ComputerName
+    $KafakHomeRemote = Get-ChildItem -Directory -Path $KafakChocolateyPackageToolsRemote | select -ExpandProperty FullName
+    $KafakHomeRemote
+}
+
 function Get-KafkaTopics {
-    start-process "$($KafkaHome.FullName)\bin\windows\kafka-topics.bat" "--zookeeper $($KafakVMVMNetworkAdapters.vmname[0]):2181"
+    param (
+        [Parameter(ValueFromPipelineByPropertyName)]$ComputerName
+    )
+    process {
+        $KafkaHome = Get-KafkaHome -ComputerName $ComputerName
+        start-process "$KafkaHome\bin\windows\kafka-topics.bat" "--zookeeper $($ComputerName):2181 --list"
+    }
 }
 
 function Get-KafkaZookeeperService {
-    Invoke-Command -Session $Sessions -ScriptBlock {get-service | where name -match zoo}
+    param (
+        [Parameter(ValueFromPipelineByPropertyName)]$ComputerName
+    )
+    process {
+        Invoke-Command -ComputerName $ComputerName -ScriptBlock {get-service | where name -match zoo}
+    }
 }
 
 function Get-KafkaService {
@@ -183,8 +204,13 @@ function Get-KafkaService {
 }
 
 function Get-KafkaServiceNetTCPConnection {
-    Invoke-Command -Session $Sessions -ScriptBlock {        
-        Get-NetTCPConnection -LocalPort 9092
+    param (
+        [Parameter(ValueFromPipelineByPropertyName)]$ComputerName
+    )
+    process {
+        Invoke-Command -ComputerName $ComputerName -ScriptBlock {        
+            Get-NetTCPConnection -LocalPort 9092
+        }
     }
 }
 
