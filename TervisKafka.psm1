@@ -12,6 +12,8 @@ function Invoke-KafkaBrokerProvision {
     New-KafkaBrokerGPO
     $Nodes | Invoke-NodeGPUpdate
     $Nodes | Set-KafkaServicesToAumaticStart
+    $Nodes | Start-KafkaZookeeper
+    $Nodes | Start-Kafka
 }
 
 function Set-KafkaServicesToAumaticStart {
