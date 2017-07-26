@@ -6,8 +6,8 @@ function Invoke-KafkaBrokerProvision {
     param (
         $EnvironmentName
     )
-    Invoke-ClusterApplicationProvision -ClusterApplicationName KafkaBroker -EnvironmentName $EnvironmentName
-    $Nodes = Get-TervisClusterApplicationNode -ClusterApplicationName KafkaBroker -EnvironmentName $EnvironmentName
+    Invoke-ApplicationProvision -ApplicationName KafkaBroker -EnvironmentName $EnvironmentName
+    $Nodes = Get-TervisApplicationNode -ApplicationName KafkaBroker -EnvironmentName $EnvironmentName
     $Nodes | Invoke-ProcessKafkaTemplateFiles
     New-KafkaBrokerGPO
     $Nodes | Invoke-NodeGPUpdate
@@ -39,7 +39,7 @@ function Invoke-ProcessKafkaTemplateFiles {
         $ZookeeperDataDirectory = "C:\tmp\zookeeper"
     }
     process {
-        $Nodes = Get-TervisClusterApplicationNode -ClusterApplicationName KafkaBroker -EnvironmentName $EnvironmentName
+        $Nodes = Get-TervisApplicationNode -ApplicationName KafkaBroker -EnvironmentName $EnvironmentName
         $NodeNumber = $Nodes.ComputerName.IndexOf($ComputerName) + 1
         $dataDir = "C:/tmp/zookeeper"
 
@@ -60,7 +60,7 @@ function Invoke-ProcessKafkaTemplateFiles {
 }
 
 function New-KafkaNodePSSession {
-    New-ApplicationNodePSSession -ClusterApplicationName KafkaBroker
+    New-ApplicationNodePSSession -ApplicationName KafkaBroker
 }
 
 function Get-KafkaLog {
