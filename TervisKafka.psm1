@@ -1,5 +1,5 @@
 ﻿#Requires -version 5.0
-#Requires -modules PasswordstatePowershell, TervisChocolatey, TervisNetTCPIP
+#Requires -modules TervisPasswordstatePowershell, TervisChocolatey, TervisNetTCPIP
 #Requires -RunAsAdministrator
 
 function Invoke-KafkaBrokerProvision {
